@@ -1,12 +1,18 @@
-name: pull-request-to-master
+name: ci-pipeline
 
 on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ main ]
 
 jobs:
-  test-go:
+  build:
     runs-on: ubuntu-latest
+    env:
+      MY_IMAGE_REPOSITORY: helton/fullcycle-desafio-go
+      MY_IMAGE_MAX_SIZE: 2097152
     steps:
     - uses: actions/checkout@v2
 
@@ -15,7 +21,7 @@ jobs:
       with:
         go-version: 1.17
 
-    - name: Test and publish coverage
+    - name: Test Go code and publish coverage
       uses: paambaati/codeclimate-action@v3.0.0
       env:
         CC_TEST_REPORTER_ID: ${{secrets.CC_TEST_REPORTER_ID}}
@@ -24,4 +30,23 @@ jobs:
         coverageLocations: ${{github.workspace}}/gocov.out:gocov
         prefix: github.com/heltonuema/fullcycle-desafio-go
 
+    - name: Build Docker image
+      run: docker build --file Dockerfile --tag myimage .
+
+    - name: Retrieve Docker image size
+      run: echo "MY_IMAGE_SIZE=$(docker inspect myimage --format "{{.Size}}")" >> $GITHUB_ENV
+
+    - name: Check Docker image max size
+      run: /bin/sh -c 'if [ $MY_IMAGE_SIZE -gt $MY_IMAGE_MAX_SIZE ]; then echo "Too big - Bigger than $MY_IMAGE_MAX_SIZE bytes" && exit 1 ; fi'
+
+    - name: Login to Docker Registry
+      uses: docker/login-action@v1
+      if: github.ref_type == 'tag'
+      with:
+        username: ${{ secrets.DOCKER_HUB_USER }}
+        password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+    - name: Publish Docker image
+      if: github.ref_type == 'tag'
+      run: docker image tag myimage $MY_IMAGE_REPOSITORY:latest && docker image tag myimage $MY_IMAGE_REPOSITORY:$GITHUB_REF_NAME && docker image push --all-tags $MY_IMAGE_REPOSITORY
     
